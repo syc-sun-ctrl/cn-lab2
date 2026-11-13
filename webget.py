@@ -1,98 +1,104 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-webget.py —— 手搓一个 HTTP 客户端（实验二 Part D，T1~T5 全部实现）
+# 实验二 Part D：自己写一个 HTTP 客户端（webget）
+# 孙宇程 251006112 网工25
+# GitHub 公有仓库：https://github.com/syc-sun-ctrl/cn-lab2
+#
+# 用法：python webget.py <host> <port> <path> [保存文件名]
+# 例：python webget.py 127.0.0.1 8080 / out.html
+#
+# 这个程序是从老师给的 8 行起点代码一点点改出来的：
+# 一开始只是 connect + send + recv 一次 + 打印，后来发现 recv 一次根本收不全，
+# 才把 recv 放进循环里，又加上了响应头解析、命令行参数和统计打印。
 
-实验二：HTTP 客户端与 TCP、UDP 协议分析
-作者：孙宇程  学号：251006112  班级：网工25
-GitHub 公有仓库：https://github.com/syc-sun-ctrl/cn-lab2
-
-用法：
-    python webget.py <host> <port> <path> [保存文件名]
-    例：python webget.py www.bjfu.edu.cn 80 / index.html
-
-功能对应：
-    T1 循环 recv：把 recv 放进 while 循环，结束条件两种——
-       (a) 响应头里有 Content-Length，按它收够就停；
-       (b) 没有 Content-Length（或 Connection: close），一直收到对端关闭（recv 返回 b""）。
-       同时打印每次 recv 的序号、字节数，方便 T4 观察。
-    T2 解析：按空行把「状态行 / 响应头 / 正文」分开；打印状态行和全部响应头；
-       正文用二进制模式 wb 写文件（文本模式会把 \r\n 改写、还可能因编码报错，图片会坏）。
-    T3 参数化：host / port / path 都不写死，从命令行参数取；参数不够就打印用法并退出。
-    T4 观察题：程序会打印 recv 次数、每次字节数、总字节数，直接能看出「一次没到齐」。
-    T5 抓包对照：程序只用了 socket 标准库，抓包时能看到 SYN/SYN+ACK/ACK + 请求 + 响应 + FIN。
-"""
 import socket
 import sys
 
-USAGE = "用法: python webget.py <host> <port> <path> [保存文件名]\n例: python webget.py www.bjfu.edu.cn 80 / index.html"
+# 一次 recv 最多要多少字节。4096 是我随手定的，改大改小都能跑
+BUF = 4096
 
 
-def build_request(host, path):
-    """构造 HTTP/1.1 请求。
-    用 Connection: close 是为了让服务器回完就关连接，这样 recv 最终能收到 b""，
-    循环一定能结束（不会挂死在 keep-alive 上）。"""
+def make_request(host, path):
+    # 拼 HTTP/1.1 请求。
+    # 这里故意加 Connection: close，让服务器回完就把连接关掉，
+    # 这样下面的 recv 最后一定能收到 b""，循环不会卡在 keep-alive 上。
     req = (
-        f"GET {path} HTTP/1.1\r\n"
-        f"Host: {host}\r\n"
-        f"User-Agent: webget/1.0 (251006112)\r\n"
-        f"Accept: */*\r\n"
-        f"Connection: close\r\n"
-        f"\r\n"
+        "GET " + path + " HTTP/1.1\r\n"
+        "Host: " + host + "\r\n"
+        "User-Agent: webget/1.0 (251006112)\r\n"
+        "Accept: */*\r\n"
+        "Connection: close\r\n"
+        "\r\n"
     )
     return req.encode("ascii")
 
 
 def recv_all(sock):
-    """T1：循环 recv，直到收够 Content-Length 或对端关闭。
-    返回 (完整字节, recv 次数, 每次字节数列表)。"""
+    """把响应整个收下来。
+
+    循环什么时候结束？我遇到的就两种情况：
+      (1) 响应头里有 Content-Length：按它写的字节数，正文收够就 break；
+      (2) 头里没有 Content-Length：那就没法提前知道多长，只能一直收，
+          直到 recv 返回 b""（说明服务器把连接关了）。
+    注意判断“正文收了几个字节”要用 len(buf) - 头长度，
+    不能直接拿 len(buf) 跟 Content-Length 比，我一开始就这么写的，
+    结果一直多算了几百字节的头，循环收不完。
+
+    返回：全部字节、recv 调了几次、每次收了多少字节的列表
+    """
     buf = b""
     counts = []
-    header_end = None
-    content_length = None
+    header_end = None      # 空行 \r\n\r\n 结束的位置（也就是正文开始的位置）
+    content_length = None  # 响应头里写的 Content-Length
 
     while True:
-        chunk = sock.recv(4096)          # 一次最多收 4096 字节，实际收到多少不确定
-        if not chunk:                    # b"" 表示对端关闭了连接（FIN）
-            print(f"  [recv #{len(counts)+1}] 收到 0 字节 → 对端关闭，循环结束")
+        chunk = sock.recv(BUF)
+        if not chunk:
+            # 空 bytes，说明对端 close 了（收到 FIN），这就是结束条件(2)
+            print("  [recv #%d] 收到 0 字节，对端关了，结束" % (len(counts) + 1))
             break
+
         counts.append(len(chunk))
         buf += chunk
-        print(f"  [recv #{len(counts)}] 收到 {len(chunk)} 字节，累计 {len(buf)} 字节")
+        print("  [recv #%d] 收到 %d 字节，一共 %d 字节" % (len(counts), len(chunk), len(buf)))
 
-        # 头还没解析过就先找空行，拿到 Content-Length
+        # 头还没解析过就找一次空行，看有没有 Content-Length
         if header_end is None:
-            idx = buf.find(b"\r\n\r\n")
-            if idx != -1:
-                header_end = idx + 4
-                head = buf[:idx].decode("iso-8859-1")
-                for line in head.split("\r\n")[1:]:
+            pos = buf.find(b"\r\n\r\n")
+            if pos != -1:
+                header_end = pos + 4
+                head_text = buf[:pos].decode("iso-8859-1")
+                for line in head_text.split("\r\n")[1:]:
                     if line.lower().startswith("content-length:"):
                         content_length = int(line.split(":", 1)[1].strip())
                         break
-                if content_length is not None:
-                    print(f"  [提示] 响应头里有 Content-Length: {content_length}，收够就停")
+                if content_length is None:
+                    print("  [提示] 头里没有 Content-Length，只能等对端关连接")
                 else:
-                    print("  [提示] 响应头里没有 Content-Length，只能靠对端关闭来判断结束")
+                    print("  [提示] Content-Length: %d，收够就停" % content_length)
 
-        # 结束条件 (a)：头里的 Content-Length 已经收满
+        # 结束条件(1)：正文已经收够 Content-Length 了
         if header_end is not None and content_length is not None:
-            if len(buf) - header_end >= content_length:
-                print(f"  [结束] 正文已收够 {content_length} 字节，停止 recv")
+            body_len = len(buf) - header_end
+            if body_len >= content_length:
+                print("  [结束] 正文收够 %d 字节，break" % content_length)
                 break
-        # 结束条件 (b)：没声明长度时，只能等上面的 b"" 分支
+
     return buf, len(counts), counts
 
 
-def parse_response(raw):
-    """T2：按空行切开，返回 (状态行, 响应头字典, 正文字节, 响应头原文列表)"""
-    idx = raw.find(b"\r\n\r\n")
-    if idx == -1:                       # 万一只收到头没收到正文（D4 那种异常也会这样）
+def split_response(raw):
+    """按空行把头、正文分开。
+    头里面第一行是状态行，剩下的每一行都是 响应头: 值。
+    """
+    pos = raw.find(b"\r\n\r\n")
+    if pos == -1:
         head, body = raw, b""
     else:
-        head, body = raw[:idx], raw[idx + 4:]
+        head, body = raw[:pos], raw[pos + 4:]
+
     lines = head.decode("iso-8859-1").split("\r\n")
-    status_line = lines[0] if lines else ""
+    status_line = lines[0] if len(lines) > 0 else ""
     headers = {}
     for line in lines[1:]:
         if ":" in line:
@@ -102,44 +108,60 @@ def parse_response(raw):
 
 
 def main():
-    if len(sys.argv) < 4:               # T3：参数不够就给用法并退出
-        print(USAGE)
+    # T3：参数不够就直接打印用法退出
+    if len(sys.argv) < 4:
+        print("用法: python webget.py <host> <port> <path> [保存文件名]")
+        print("例: python webget.py 127.0.0.1 8080 / out.html")
         sys.exit(1)
 
     host = sys.argv[1]
     port = int(sys.argv[2])
     path = sys.argv[3]
+    if not path.startswith("/"):
+        path = "/" + path
     outfile = sys.argv[4] if len(sys.argv) > 4 else "body.bin"
 
-    print(f"== webget == 目标 {host}:{port}{path}")
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(10)                # 防止挂在坏服务器上（DNS 失败/端口不通也会抛异常）
-        print(f"[1] 连接 {host}:{port} ……（抓包里这里的三个包就是三次握手）")
+    print("目标：%s:%d%s" % (host, port, path))
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(10)  # 防止服务器不回，一直卡在这
+    try:
+        print("[1] connect ...（抓包里的三次握手就是这里）")
         s.connect((host, port))
-        req = build_request(host, path if path.startswith("/") else "/" + path)
-        print(f"[2] 发送请求 {len(req)} 字节：")
-        print("    " + req.decode("ascii").replace("\r\n", "\n    "))
+
+        req = make_request(host, path)
+        print("[2] 发请求，%d 字节" % len(req))
         s.sendall(req)
 
-        print("[3] 循环接收响应：")
+        print("[3] 开始收响应：")
         raw, n_recv, counts = recv_all(s)
+    finally:
+        s.close()
 
-    print(f"\n[4] 解析：共收到 {len(raw)} 字节，recv 调用 {n_recv} 次，每次字节数 = {counts}")
-    status_line, headers, body, head_lines = parse_response(raw)
-    print(f"    状态行：{status_line}")
+    print("")
+    print("[4] 一共收到 %d 字节，recv 了 %d 次，每次字节数：%s" % (len(raw), n_recv, counts))
+    status_line, headers, body, head_lines = split_response(raw)
+    print("    状态行：" + status_line)
     print("    响应头：")
     for line in head_lines[1:]:
         print("      " + line)
 
-    print(f"\n[5] 写正文：{len(body)} 字节 → {outfile}（用 wb 二进制模式写）")
-    with open(outfile, "wb") as f:      # 二进制模式：不翻译换行、不猜编码
-        f.write(body)
+    # T2：正文用 wb 存。文本模式(w)会把 \r\n 改成 \n，还会按编码解码，
+    # 存图片直接就是坏文件，我试过，所以这里必须二进制。
+    print("")
+    print("[5] 正文 %d 字节，用 wb 写到 %s" % (len(body), outfile))
+    f = open(outfile, "wb")
+    f.write(body)
+    f.close()
 
-    # T4 观察题要的统计，直接打出来
-    print(f"\n[T4 观察] recv 次数={n_recv}，每次字节数={counts}")
-    print(f"[T4 观察] 总收到 {len(raw)} 字节，其中响应头 {len(raw) - len(body)} 字节、正文 {len(body)} 字节")
-    print("[T4 观察] 这说明一次 recv 并不等于一个 HTTP 报文，TCP 是字节流，"
-          "要靠 Content-Length 或对端关闭才能知道“收完了”")
+    # T4 要的统计，直接打印出来看
+    print("")
+    print("[统计] recv 次数 = %d" % n_recv)
+    print("[统计] 每次字节数 = %s" % counts)
+    print("[统计] 总共 %d 字节 = 响应头 %d + 正文 %d"
+          % (len(raw), len(raw) - len(body), len(body)))
+    print("[统计] 一次 recv 不等于一个 HTTP 报文，TCP 是字节流，"
+          "得靠 Content-Length 或者对端关闭才知道收完没有")
 
 
 if __name__ == "__main__":

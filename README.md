@@ -36,7 +36,7 @@ python s3_client.py 127.0.0.1 5200               # 看到端口后强杀进程�
 python d3_fragment.py 223.5.5.5 53 2000
 
 # Part D
-python webget.py www.bjfu.edu.cn 80 / out.html
+python webget.py 127.0.0.1 8080 / out.html
 python webget.py                                  # 参数不够时会打印用法
 ```
 
