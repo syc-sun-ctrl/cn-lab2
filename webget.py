@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# webget.py —— 实验二 Part D：自己写的 HTTP 客户端
-# GitHub：https://github.com/syc-sun-ctrl/cn-lab2
-#
-# 用法：python webget.py <host> <port> <path> [保存文件名]
-# 例：python webget.py 127.0.0.1 8080 / out.html
+# GitHub: https://github.com/syc-sun-ctrl/cn-lab2
 
 import socket
 import sys
