@@ -4,7 +4,6 @@
 tcpclient.py —— 教材第 2 章 TCP 客户端示例（A2、B 部分用）
 
 实验二：HTTP 客户端与 TCP、UDP 协议分析
-作者：孙宇程  学号：251006112  班级：网工25
 GitHub 公有仓库：https://github.com/syc-sun-ctrl/cn-lab2
 
 说明（A 部分要回答的问题就在这几行里）：

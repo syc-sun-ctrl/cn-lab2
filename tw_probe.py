@@ -5,7 +5,6 @@ tw_probe.py —— S3 辅助：正常连接→发一句→正常关闭，并打�
                  方便外部脚本用 netstat 观察该端口在 TIME_WAIT 里待多久。
 
 实验二：HTTP 客户端与 TCP、UDP 协议分析
-作者：孙宇程  学号：251006112  班级：网工25
 GitHub 公有仓库：https://github.com/syc-sun-ctrl/cn-lab2
 """
 import socket

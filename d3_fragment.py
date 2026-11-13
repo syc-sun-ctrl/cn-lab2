@@ -4,7 +4,6 @@
 d3_fragment.py —— D3：一次发送 2000 字节的 UDP 报文，观察 IP 分片
 
 实验二：HTTP 客户端与 TCP、UDP 协议分析
-作者：孙宇程  学号：251006112  班级：网工25
 GitHub 公有仓库：https://github.com/syc-sun-ctrl/cn-lab2
 
 说明：
